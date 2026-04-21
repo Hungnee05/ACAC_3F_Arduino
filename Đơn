@@ -1,0 +1,206 @@
+#include <Arduino.h>
+enum StateA1 { a11, a12, a13, a14 };
+enum StateA2 { a21, a22, a23, a24 };
+enum StateB1 { b11, b12, b13, b14 };
+enum StateB2 { b21, b22, b23, b24 };
+enum StateC1 { c11, c12, c13, c14 };
+enum StateC2 { c21, c22, c23, c24 };
+
+StateA1 SA1 = a11; StateA2 SA2 = a21;
+StateB1 SB1 = b11; StateB2 SB2 = b21;
+StateC1 SC1 = c11; StateC2 SC2 = c21;
+
+uint16_t tStartA1, tStartA2, tStartB1, tStartB2, tStartC1, tStartC2;
+uint16_t alpha = 6667;
+uint16_t kA1 = 0, kA2 = 0, kB1 = 0, kB2 = 0, kC1 = 0, kC2 = 0;
+const uint16_t T = 100;
+const uint16_t n = 1;
+uint8_t lastA = 1, lastB = 1, lastC = 1;
+
+#define T1_ON  PORTE |= (1<<PE4)
+#define T1_OFF PORTE &= ~(1<<PE4)
+#define T4_ON  PORTE |= (1<<PE3)
+#define T4_OFF PORTE &= ~(1<<PE3)
+#define T3_ON  PORTG |= (1<<PG5)
+#define T3_OFF PORTG &= ~(1<<PG5)
+#define T6_ON  PORTH |= (1<<PH4)
+#define T6_OFF PORTH &= ~(1<<PH4)
+#define T5_ON  PORTH |= (1<<PH3)
+#define T5_OFF PORTH &= ~(1<<PH3)
+#define T2_ON  PORTE |= (1<<PE5)
+#define T2_OFF PORTE &= ~(1<<PE5)
+#define READ_DIS (PINC & (1<<PC4))
+
+volatile uint16_t offA1 = 0, offA2 = 0;
+volatile uint16_t offB1 = 0, offB2 = 0;
+volatile uint16_t offC1 = 0, offC2 = 0;
+
+void setupTimer1()
+{
+  TCCR1A = 0;
+  TCCR1B = 0;
+  TCCR1B |= (1<<CS11);
+}
+
+ISR(TIMER1_COMPA_vect)
+{
+  uint16_t now = TCNT1;
+  if(offA1 && (int16_t)(now - offA1) >= 0){ T1_OFF; offA1 = 0; }
+  if(offA2 && (int16_t)(now - offA2) >= 0){ T4_OFF; offA2 = 0; }
+  uint16_t next = 0xFFFF;
+  if(offA1) next = offA1;
+  if(offA2 && (int16_t)(offA2 - next) < 0) next = offA2;
+  if(next != 0xFFFF) OCR1A = next;
+  else TIMSK1 &= ~(1<<OCIE1A);
+}
+
+ISR(TIMER1_COMPB_vect)
+{
+  uint16_t now = TCNT1;
+  if(offB1 && (int16_t)(now - offB1) >= 0){ T3_OFF; offB1 = 0; }
+  if(offB2 && (int16_t)(now - offB2) >= 0){ T6_OFF; offB2 = 0; }
+  uint16_t next = 0xFFFF;
+  if(offB1) next = offB1;
+  if(offB2 && (int16_t)(offB2 - next) < 0) next = offB2;
+  if(next != 0xFFFF) OCR1B = next;
+  else TIMSK1 &= ~(1<<OCIE1B);
+}
+
+ISR(TIMER1_COMPC_vect)
+{
+  uint16_t now = TCNT1;
+  if(offC1 && (int16_t)(now - offC1) >= 0){ T5_OFF; offC1 = 0; }
+  if(offC2 && (int16_t)(now - offC2) >= 0){ T2_OFF; offC2 = 0; }
+  uint16_t next = 0xFFFF;
+  if(offC1) next = offC1;
+  if(offC2 && (int16_t)(offC2 - next) < 0) next = offC2;
+  if(next != 0xFFFF) OCR1C = next;
+  else TIMSK1 &= ~(1<<OCIE1C);
+}
+
+void setup()
+{
+  DDRD &= ~((1<<PD3)|(1<<PD2)|(1<<PD1));
+  PORTD |= (1<<PD3)|(1<<PD2)|(1<<PD1);
+  DDRE |= (1<<PE4)|(1<<PE3)|(1<<PE5);
+  DDRG |= (1<<PG5);
+  DDRH |= (1<<PH3)|(1<<PH4);
+  DDRC &= ~(1<<PC4);
+  PORTC |= (1<<PC4);
+  setupTimer1();
+}
+
+void loop()
+{
+  static uint32_t lastAdc = 0;
+  /*if(micros()-lastAdc > 1000)
+  {
+    lastAdc = micros();
+    alpha = ((uint32_t)analogRead(A0)*10000UL)/1023UL;
+  }*/
+  alpha = 278;
+  uint8_t curA = (PIND & (1<<PD3)) ? 1 : 0;
+  uint8_t curB = (PIND & (1<<PD2)) ? 1 : 0;
+  uint8_t curC = (PIND & (1<<PD1)) ? 1 : 0;
+  uint8_t DIS = READ_DIS ? 1 : 0;
+  uint16_t now = TCNT1;
+  if (DIS == 1)
+  {
+    T1_OFF;
+    T2_OFF;
+    T3_OFF;
+    T4_OFF;
+    T5_OFF;
+    T6_OFF;
+    SA1 = a11;
+    SA2 = a21;
+    SB1 = b11;
+    SB2 = b21;
+    SC1 = c11;
+    SC2 = c21;
+    kA1 = 0;
+    kA2 = 0;
+    kB1 = 0;
+    kB2 = 0;
+    kC1 = 0;
+    kC2 = 0;
+    lastA = curA;
+    lastB = curB;
+    lastC = curC;
+    return;
+  }
+  switch(SA1)
+  {
+    case a11: if(curA == 0 && lastA == 1) SA1 = a12; break;
+    case a12: tStartA1 = now; SA1 = a13; break;
+    case a13:
+      if((uint16_t)(now - tStartA1) >= 2*(alpha + kA1*T))
+      {
+        T1_ON;
+        T6_ON;
+        SA1 = a14;
+      }
+      break;
+    case a14:
+      if((uint16_t)(now - tStartA1) >= 2*(200 + alpha + kA1*T))
+      {
+        T1_OFF;
+        T6_OFF;
+        kA1++;
+        if(kA1 >= n){ kA1 = 0; SA1 = a11; }
+        else SA1 = a13;
+      }
+      break;
+  }
+  switch(SA2)
+  {
+    case a21: if(curA == 1 && lastA == 0) SA2 = a22; break;
+    case a22: tStartA2 = now; SA2 = a23; break;
+    case a23:
+      if((uint16_t)(now - tStartA2) >= 2*(alpha + kA2*T))
+      {
+        T4_ON;
+        T3_ON;
+        SA2 = a24;
+      }
+      break;
+    case a24:
+      if((uint16_t)(now - tStartA2) >= 2*(200 + alpha + kA2*T))
+      {
+        T4_OFF;
+        T3_OFF;
+        kA2++;
+        if(kA2 >= n){ kA2 = 0; SA2 = a21; }
+        else SA2 = a23;
+      }
+      break;
+  }
+  switch(SB1)
+  {
+    case b11: if(curB == 0 && lastB == 1) SB1 = b12; break;
+    case b12: tStartB1 = now; SB1 = b13; break;
+    case b13:
+      if((uint16_t)(now - tStartB1) >= 2*(alpha + kB1*T))
+      {
+        T3_ON;
+        T2_ON;
+        SB1 = b14;
+      }
+      break;
+    case b14:
+      if((uint16_t)(now - tStartB1) >= 2*(200 + alpha + kB1*T))
+      {
+        T3_OFF;
+        T2_OFF;
+        kB1++;
+        if(kB1 >= n){ kB1 = 0; SB1 = b11; }
+        else SB1 = b13;
+      }
+      break;
+  }
+  switch(SB2)
+  {
+    case b21: if(curB == 1 && lastB == 0) SB2 = b22; break;
+    case b22: tStartB2 = now; SB2 = b23; break;
+    case b23:
+      if((uint16_t)(now - tStartB2) >= 2*(alpha + kB2*T))
